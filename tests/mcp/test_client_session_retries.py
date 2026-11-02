@@ -15,7 +15,7 @@ from mcp.types import (
 )
 
 from agents.exceptions import UserError
-from agents.mcp._compat import mcp_request_timeout_code
+from agents.mcp._compat import MCP_V2, mcp_request_timeout_code
 from agents.mcp.server import (
     MCPServerSse,
     MCPServerStdio,
@@ -699,7 +699,7 @@ async def test_serialized_prompt_requests_prevent_tool_cancellation(prompt_metho
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prompt_method", ["list_prompts", "get_prompt"])
-async def test_streamable_http_serializes_call_tool_with_prompt_requests(prompt_method: str):
+async def test_streamable_http_call_tool_and_prompt_requests_share_session(prompt_method: str):
     shared_session = OverlapTrackingSession()
     isolated_session = IsolatedRetrySession()
     server = DummyPromptStreamableHttpServer(shared_session, isolated_session)
@@ -718,7 +718,8 @@ async def test_streamable_http_serializes_call_tool_with_prompt_requests(prompt_
         assert isinstance(results[1], ListPromptsResult)
     else:
         assert isinstance(results[1], GetPromptResult)
-    assert shared_session.max_in_flight == 1
+    # Only MCP v1's transport needs requests serialized; v2 isolates per-request failures.
+    assert shared_session.max_in_flight == (2 if MCP_V2 else 1)
     assert isolated_session.call_tool_attempts == 0
 
 
@@ -870,3 +871,41 @@ async def test_streamable_http_backoff_respects_configured_maximum(monkeypatch):
     await server.call_tool("tool", None)
 
     assert delays == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 64.0, 64.0]
+
+
+class OverlapSession:
+    def __init__(self, expected: int):
+        self.expected = expected
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self._all_started = asyncio.Event()
+
+    async def call_tool(self, tool_name, arguments, meta=None):
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        if self.in_flight >= self.expected:
+            self._all_started.set()
+        try:
+            await asyncio.wait_for(self._all_started.wait(), timeout=0.5)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            self.in_flight -= 1
+        return CallToolResult(content=[])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not MCP_V2, reason="MCP v1 streamable HTTP still needs serialized requests")
+async def test_streamable_http_runs_parallel_tool_calls_concurrently_on_mcp_v2():
+    server = MCPServerStreamableHttp(
+        params={"url": "http://localhost:8000/mcp"},
+        client_session_timeout_seconds=None,
+        max_retry_attempts=0,
+    )
+    session = OverlapSession(expected=3)
+    server.session = cast(ClientSession, session)
+
+    results = await asyncio.gather(*(server.call_tool("tool", None) for _ in range(3)))
+
+    assert all(isinstance(result, CallToolResult) for result in results)
+    assert session.max_in_flight == 3

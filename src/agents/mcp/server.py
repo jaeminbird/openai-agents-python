@@ -2391,7 +2391,11 @@ class MCPServerStreamableHttp(_MCPServerWithClientSession):
 
         self.params = params
         self._name = name or f"streamable_http: {self.params['url']}"
-        self._serialize_session_requests = True
+        # MCP v1's streamable HTTP transport ran every POST in one task group, so a failed
+        # request cancelled its in-flight siblings. MCP v2 turns HTTP errors into per-request
+        # JSON-RPC errors, so serializing there only queues parallel tool calls behind each
+        # other.
+        self._serialize_session_requests = not MCP_V2
 
     def create_streams(
         self,
