@@ -426,6 +426,36 @@ class OpenAIServerConversationTracker:
 
         self.remaining_initial_input = remaining or None
 
+    async def deliver_pending_tool_outputs(
+        self,
+        model: Any,
+        original_input: str | list[TResponseInputItem],
+        generated_items: list[RunItem],
+    ) -> None:
+        """Add tool outputs the run produced but never sent to the server conversation.
+
+        A run that stops at the turn limit has already executed the last turn's tools, and the
+        conversation already holds the matching calls. Without their outputs, every later
+        response in that conversation is rejected with "No tool output found".
+        """
+        if self.conversation_id is None:
+            return
+        from ..models.openai_responses import OpenAIResponsesModel
+
+        if not isinstance(model, OpenAIResponsesModel):
+            return
+        pending = [
+            item
+            for item in self.prepare_input(original_input, generated_items)
+            if isinstance(item, dict) and str(item.get("type", "")).endswith("_call_output")
+        ]
+        if not pending:
+            return
+        await model._client.conversations.items.create(
+            self.conversation_id, items=cast(Any, pending)
+        )
+        self.mark_input_as_sent(pending)
+
     def validate_pending_input_filter(self, items: Sequence[TResponseInputItem]) -> None:
         """Reject filter rewrites whose pending-input lineage cannot be determined safely."""
         pending_ids = {

@@ -124,6 +124,7 @@ from .run_internal.run_loop import (
     _ToolTaskCancellation,
     cleanup_models_after_run,
     finalize_max_turns_handler_output,
+    get_model,
     get_output_schema,
     preserve_tool_task_cancellation,
     resolve_interrupted_turn,
@@ -1604,6 +1605,12 @@ class AgentRunner:
                             ),
                         )
                         max_turns_error = MaxTurnsExceeded(f"Max turns ({max_turns}) exceeded")
+                        if server_conversation_tracker is not None:
+                            await server_conversation_tracker.deliver_pending_tool_outputs(
+                                get_model(current_agent, run_config),
+                                original_input,
+                                pending_server_items or generated_items,
+                            )
                         run_error_data = build_run_error_data(
                             input=original_input,
                             new_items=session_items,

@@ -1785,6 +1785,12 @@ async def start_streaming(
                     ),
                 )
                 max_turns_error = MaxTurnsExceeded(f"Max turns ({max_turns}) exceeded")
+                if server_conversation_tracker is not None:
+                    await server_conversation_tracker.deliver_pending_tool_outputs(
+                        get_model(current_agent, run_config),
+                        streamed_result.input,
+                        pending_server_items or streamed_result._model_input_items,
+                    )
                 handler_configured = bool(
                     error_handlers and error_handlers.get("max_turns") is not None
                 )
