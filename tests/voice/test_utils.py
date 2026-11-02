@@ -69,3 +69,35 @@ def test_split_without_trailing_whitespace_is_unchanged() -> None:
         "This sentence is long enough to flush.",
         "He",
     )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "好的，这是计划。首先我们收拾行李，然后开车去机场。最后我们登机休息！你觉得怎么样？",
+        "はい、これが計画です。まず荷物を"
+        "まとめて、次に車で空港へ行きます。"
+        "最後に飛行機に乗ります。",
+    ],
+    ids=["chinese", "japanese"],
+)
+@pytest.mark.parametrize("chunk_size", [1, 3, 7])
+def test_cjk_text_is_spoken_sentence_by_sentence(text: str, chunk_size: int) -> None:
+    """Full-width sentence marks have no space after them, so they must split on their own.
+
+    Without that, a Chinese or Japanese reply was never split and text-to-speech only started
+    after the whole response had streamed in.
+    """
+    spoken = _stream(text, chunk_size, min_sentence_length=10)
+
+    assert len(spoken) > 1
+    assert "".join(spoken) == text
+
+
+def test_cjk_split_keeps_sentences_unspaced() -> None:
+    split = get_sentence_based_splitter(5)
+
+    assert split("这是第一句话。这是第二句话。还没") == (
+        "这是第一句话。这是第二句话。",
+        "还没",
+    )
