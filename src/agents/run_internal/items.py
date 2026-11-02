@@ -64,6 +64,7 @@ __all__ = [
     "TOOL_CALL_SESSION_TITLE_KEY",
     "apply_reasoning_item_id_policy",
     "copy_input_items",
+    "drop_leading_items_cut_from_their_response",
     "drop_orphan_function_calls",
     "ensure_input_item_format",
     "prepare_model_input_items",
@@ -206,6 +207,41 @@ def run_items_to_input_items(
         if item is not None:
             converted.append(item)
     return converted
+
+
+def drop_leading_items_cut_from_their_response(
+    items: list[TResponseInputItem],
+) -> list[TResponseInputItem]:
+    """Drop stored model output at the start of a truncated history window.
+
+    A window cut by ``SessionSettings(limit=...)`` can start in the middle of a model response,
+    after its reasoning item. The Responses API rejects a stored output item replayed without
+    its reasoning item (``Item '...' of type '...' was provided without its required
+    'reasoning' item``), so drop leading output items that carry a response item ID until the
+    window reaches a reasoning item or an input item. Leading tool outputs have lost their
+    calls and are dropped with them, as orphan pruning would drop them anyway.
+    """
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            return items[index:]
+        item_type = item.get("type")
+        if isinstance(item_type, str) and item_type.endswith("_output"):
+            continue
+        item_id = item.get("id")
+        is_stored_output = (
+            (item_type == "message" and item.get("role") == "assistant")
+            or (isinstance(item_type, str) and item_type.endswith("_call"))
+            or (isinstance(item_type, str) and item_type.startswith("mcp_"))
+        )
+        if (
+            is_stored_output
+            and isinstance(item_id, str)
+            and item_id
+            and item_id != FAKE_RESPONSES_ID
+        ):
+            continue
+        return items[index:]
+    return []
 
 
 def drop_orphan_function_calls(

@@ -64,6 +64,7 @@ from .items import (
     copy_input_items,
     deduplicate_input_items_preferring_latest,
     digest_input_item,
+    drop_leading_items_cut_from_their_response,
     drop_orphan_function_calls,
     ensure_input_item_format,
     ensure_nested_history_run_item_occurrence_key,
@@ -461,6 +462,9 @@ async def prepare_input_with_session(
             wrapper=wrapper,
             capture_compaction_generation=True,
         )
+        if session_input_callback is None and len(history) >= resolved_settings.limit:
+            # The window may start inside a model response; a custom callback owns its history.
+            history = drop_leading_items_cut_from_their_response(history)
     else:
         history = await _session_get_items(
             session,
