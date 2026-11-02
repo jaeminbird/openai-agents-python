@@ -707,6 +707,19 @@ class ChatCmplStreamHandler:
             delta = choice.delta
             choice_logprobs = choice.logprobs
 
+            if isinstance(delta.content, list):
+                # Mistral streams thinking and text chunks as list-valued content while
+                # reasoning; route them through the reasoning_content and text paths below.
+                delta_text, delta_thinking = ChatCmplHelpers.split_content_chunks(delta.content)
+                delta = delta.model_copy(
+                    update={
+                        "content": delta_text,
+                        "reasoning_content": (
+                            getattr(delta, "reasoning_content", None) or delta_thinking or None
+                        ),
+                    }
+                )
+
             if getattr(delta, "audio", None):
                 # The sync converter rejects audio output; a silent empty stream would
                 # diverge from that released behavior.

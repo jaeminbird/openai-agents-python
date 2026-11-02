@@ -137,10 +137,13 @@ class Converter:
         """
         items: list[TResponseOutputItem] = []
 
+        # Mistral returns list-valued content (thinking and text chunks) when reasoning is on.
+        message_content, chunk_thinking = ChatCmplHelpers.split_content_chunks(message.content)
+
         # Check if message is agents.extensions.models.litellm_model.InternalChatCompletionMessage.
         # We can't actually import it here because litellm is an optional dependency.
         # So we use hasattr to check for provider-specific reasoning fields.
-        reasoning_content = getattr(message, "reasoning_content", "")
+        reasoning_content = getattr(message, "reasoning_content", "") or chunk_thinking
         raw_reasoning = getattr(message, "reasoning", "")
         raw_thinking_blocks = getattr(message, "thinking_blocks", None)
         thinking_blocks = (
@@ -217,10 +220,10 @@ class Converter:
             message_kwargs["provider_data"] = provider_data
 
         message_item = ResponseOutputMessage(**message_kwargs)
-        if message.content:
+        if message_content:
             message_item.content.append(
                 ResponseOutputText(
-                    text=message.content,
+                    text=message_content,
                     type="output_text",
                     annotations=cls._convert_annotations(message),
                     logprobs=[],

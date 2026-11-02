@@ -40,6 +40,41 @@ HEADERS_OVERRIDE: ContextVar[dict[str, str] | None] = ContextVar(
 
 
 class ChatCmplHelpers:
+    @staticmethod
+    def split_content_chunks(content: Any) -> tuple[Any, str]:
+        """Split a list-valued assistant ``content`` into answer text and thinking text.
+
+        Some OpenAI-compatible providers return ``content`` as a list of chunks instead of a
+        string. Mistral does this whenever reasoning is enabled: ``{"type": "thinking",
+        "thinking": [{"type": "text", "text": ...}]}`` chunks carry the reasoning trace and
+        ``{"type": "text", "text": ...}`` chunks carry the answer, in both full messages and
+        streamed deltas. Non-list content is returned unchanged with no thinking text.
+        """
+        if not isinstance(content, list):
+            return content, ""
+
+        text_parts: list[str] = []
+        thinking_parts: list[str] = []
+        for chunk in content:
+            if isinstance(chunk, str):
+                text_parts.append(chunk)
+                continue
+            if not isinstance(chunk, Mapping):
+                continue
+            chunk_type = chunk.get("type")
+            if chunk_type == "text" and isinstance(chunk.get("text"), str):
+                text_parts.append(chunk["text"])
+            elif chunk_type == "thinking":
+                thinking = chunk.get("thinking")
+                if isinstance(thinking, str):
+                    thinking_parts.append(thinking)
+                elif isinstance(thinking, list):
+                    for part in thinking:
+                        if isinstance(part, Mapping) and isinstance(part.get("text"), str):
+                            thinking_parts.append(part["text"])
+        text = "".join(text_parts)
+        return (text if text else None), "".join(thinking_parts)
+
     @classmethod
     def is_openai(cls, client: AsyncOpenAI) -> bool:
         return is_official_openai_client(client)
